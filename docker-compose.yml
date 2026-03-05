@@ -1,0 +1,25 @@
+services:
+  backend:
+    build:
+      context: .                        # project root so Dockerfile can reach third_party/
+      dockerfile: backend/Dockerfile
+    container_name: fireguard-backend
+    ports:
+      - "8000:8000"
+    environment:
+      FIREGUARD_DATABASE_URL: "sqlite:///./data/fireguard.db"
+      FIREGUARD_DATA_DIR: "./data"
+      FIREGUARD_AUTH_ENABLED: "false"
+      # Set FIREGUARD_API_KEY to enable key-based auth (e.g. in .env or CI secrets)
+    volumes:
+      - ./backend/data:/app/data
+
+  frontend:
+    build: ./frontend
+    container_name: fireguard-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_BASE_URL: "http://localhost:8000"
+    depends_on:
+      - backend
