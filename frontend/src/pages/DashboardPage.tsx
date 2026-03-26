@@ -11,38 +11,53 @@ import {
 
 type Mode = "location" | "csv";
 
+function Spinner() {
+  return (
+    <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+      />
+    </svg>
+  );
+}
+
 export function DashboardPage() {
   const [mode, setMode] = useState<Mode>("location");
 
-  // Location mode state
   const [lat, setLat] = useState("");
   const [lon, setLon] = useState("");
 
-  // CSV mode state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [dataset, setDataset] = useState<DatasetRecord | null>(null);
   const [temperatureWeight, setTemperatureWeight] = useState(0.5);
   const [humidityWeight, setHumidityWeight] = useState(0.3);
   const [windWeight, setWindWeight] = useState(0.2);
 
-  // Shared state
   const [runResult, setRunResult] = useState<RunRecord | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  function switchMode(m: Mode) {
+    setMode(m);
+    setError("");
+    setRunResult(null);
+  }
 
   async function handleLocationRisk(event: FormEvent) {
     event.preventDefault();
     const parsedLat = parseFloat(lat);
     const parsedLon = parseFloat(lon);
     if (isNaN(parsedLat) || isNaN(parsedLon)) {
-      setError("Enter valid latitude and longitude values.");
+      setError("Enter valid coordinates.");
       return;
     }
     setError("");
     setLoading(true);
     try {
-      const result = await runRiskFromLocation(parsedLat, parsedLon);
-      setRunResult(result);
+      setRunResult(await runRiskFromLocation(parsedLat, parsedLon));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Request failed.");
     } finally {
@@ -52,15 +67,11 @@ export function DashboardPage() {
 
   async function handleUpload(event: FormEvent) {
     event.preventDefault();
-    if (!selectedFile) {
-      setError("Choose a CSV file first.");
-      return;
-    }
+    if (!selectedFile) { setError("Choose a CSV file first."); return; }
     setError("");
     setLoading(true);
     try {
-      const uploaded = await uploadDataset(selectedFile);
-      setDataset(uploaded);
+      setDataset(await uploadDataset(selectedFile));
       setRunResult(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed.");
@@ -74,10 +85,11 @@ export function DashboardPage() {
     setError("");
     setLoading(true);
     try {
-      const result = await runRisk(dataset.dataset_id, {
-        weights: { temperature: temperatureWeight, humidity: humidityWeight, wind_speed: windWeight },
-      });
-      setRunResult(result);
+      setRunResult(
+        await runRisk(dataset.dataset_id, {
+          weights: { temperature: temperatureWeight, humidity: humidityWeight, wind_speed: windWeight },
+        })
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Risk run failed.");
     } finally {
@@ -86,141 +98,169 @@ export function DashboardPage() {
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
-      <section className="panel space-y-6">
+    <div className="grid gap-5 lg:grid-cols-[1.1fr_1fr] animate-fade-up">
+      {/* Controls */}
+      <section className="panel space-y-5">
         <div>
-          <p className="text-xs uppercase tracking-wider text-cyan-300">Live workflow</p>
-          <h1 className="mt-1 text-3xl font-bold text-white">Risk dashboard</h1>
-          <p className="mt-2 text-sm text-slate-300">
-            Compute fire risk from a live location (MET Norway + FRCM model) or from an uploaded CSV dataset.
-          </p>
+          <p className="text-xs font-semibold uppercase tracking-widest text-orange-400/70">FireGuard</p>
+          <h1 className="mt-0.5 text-2xl font-bold text-white">Risk Dashboard</h1>
         </div>
 
         {/* Mode toggle */}
-        <div className="flex gap-2">
+        <div className="flex gap-1 rounded-xl border border-white/[0.07] bg-black/20 p-1">
           <button
-            className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
+            className={`flex-1 rounded-lg py-2 text-sm font-medium transition-all duration-200 ${
               mode === "location"
-                ? "bg-cyan-600 text-white"
-                : "bg-white/10 text-slate-300 hover:bg-white/20"
+                ? "bg-orange-500/20 text-orange-300 border border-orange-500/25 shadow-sm"
+                : "text-slate-400 hover:text-slate-200"
             }`}
-            onClick={() => { setMode("location"); setError(""); setRunResult(null); }}
+            onClick={() => switchMode("location")}
           >
-            Location (MET + FRCM)
+            Location
           </button>
           <button
-            className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
+            className={`flex-1 rounded-lg py-2 text-sm font-medium transition-all duration-200 ${
               mode === "csv"
-                ? "bg-cyan-600 text-white"
-                : "bg-white/10 text-slate-300 hover:bg-white/20"
+                ? "bg-orange-500/20 text-orange-300 border border-orange-500/25 shadow-sm"
+                : "text-slate-400 hover:text-slate-200"
             }`}
-            onClick={() => { setMode("csv"); setError(""); setRunResult(null); }}
+            onClick={() => switchMode("csv")}
           >
-            CSV upload
+            CSV Upload
           </button>
         </div>
 
         {/* Location form */}
         {mode === "location" && (
-          <form className="space-y-3 rounded-2xl border border-white/10 bg-black/20 p-4" onSubmit={handleLocationRisk}>
-            <p className="text-xs text-slate-400">
-              Fetches a 48-hour forecast from MET Norway and runs the FRCM fire-risk model.
-            </p>
-            <label className="block text-sm text-slate-200">
-              Latitude
-              <input
-                className="input mt-1"
-                type="number"
-                step="0.0001"
-                placeholder="60.3913"
-                value={lat}
-                onChange={(e) => setLat(e.target.value)}
-                required
-              />
-            </label>
-            <label className="block text-sm text-slate-200">
-              Longitude
-              <input
-                className="input mt-1"
-                type="number"
-                step="0.0001"
-                placeholder="5.3221"
-                value={lon}
-                onChange={(e) => setLon(e.target.value)}
-                required
-              />
-            </label>
-            <p className="text-xs text-slate-500">Bergen: 60.3913, 5.3221 &nbsp;|&nbsp; Oslo: 59.9139, 10.7522</p>
-            <button className="button" type="submit" disabled={loading}>
-              {loading ? "Fetching forecast..." : "Get fire risk"}
+          <form className="space-y-4 animate-fade-in" onSubmit={handleLocationRisk}>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block text-xs font-medium text-slate-400">
+                Latitude
+                <input
+                  className="input mt-1.5"
+                  type="number"
+                  step="0.0001"
+                  placeholder="60.3913"
+                  value={lat}
+                  onChange={(e) => setLat(e.target.value)}
+                  required
+                />
+              </label>
+              <label className="block text-xs font-medium text-slate-400">
+                Longitude
+                <input
+                  className="input mt-1.5"
+                  type="number"
+                  step="0.0001"
+                  placeholder="5.3221"
+                  value={lon}
+                  onChange={(e) => setLon(e.target.value)}
+                  required
+                />
+              </label>
+            </div>
+
+            {/* Quick-fill chips */}
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-slate-600">Quick fill:</span>
+              <button
+                type="button"
+                className="rounded-lg border border-orange-500/25 bg-orange-500/10 px-2.5 py-1 text-xs font-medium text-orange-300 transition hover:bg-orange-500/20"
+                onClick={() => { setLat("60.3913"); setLon("5.3221"); }}
+              >
+                Bergen
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-white/15 bg-white/5 px-2.5 py-1 text-xs font-medium text-slate-300 transition hover:bg-white/10"
+                onClick={() => { setLat("59.9139"); setLon("10.7522"); }}
+              >
+                Oslo
+              </button>
+            </div>
+
+            <button className="button w-full" type="submit" disabled={loading}>
+              {loading ? <><Spinner /> Analyzing…</> : "Get Fire Risk"}
             </button>
           </form>
         )}
 
-        {/* CSV upload form */}
+        {/* CSV form */}
         {mode === "csv" && (
-          <div className="space-y-4">
-            <form className="space-y-3 rounded-2xl border border-white/10 bg-black/20 p-4" onSubmit={handleUpload}>
-              <label className="block text-sm font-medium text-slate-200">Dataset CSV</label>
-              <input
-                className="input"
-                type="file"
-                accept=".csv,text/csv"
-                onChange={(e) => setSelectedFile(e.target.files?.[0] ?? null)}
-              />
-              <button className="button" type="submit" disabled={loading}>
-                {loading ? "Uploading..." : "Upload dataset"}
+          <div className="space-y-4 animate-fade-in">
+            <form className="space-y-3" onSubmit={handleUpload}>
+              <label className="block text-xs font-medium text-slate-400">
+                Dataset CSV
+                <input
+                  className="input mt-1.5"
+                  type="file"
+                  accept=".csv,text/csv"
+                  onChange={(e) => setSelectedFile(e.target.files?.[0] ?? null)}
+                />
+              </label>
+              <button className="button w-full" type="submit" disabled={loading || !selectedFile}>
+                {loading && !dataset ? <><Spinner /> Uploading…</> : "Upload Dataset"}
               </button>
             </form>
 
             {dataset && (
-              <>
-                <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-4 text-sm text-slate-200">
-                  <p><span className="text-slate-400">File:</span> {dataset.filename}</p>
-                  <p className="mt-1"><span className="text-slate-400">Rows:</span> {dataset.row_count}</p>
+              <div className="space-y-4 animate-fade-in">
+                <div className="flex items-center gap-3 rounded-xl border border-emerald-400/20 bg-emerald-400/5 px-4 py-3 text-sm">
+                  <span className="text-emerald-400">✓</span>
+                  <div>
+                    <p className="font-medium text-slate-100">{dataset.filename}</p>
+                    <p className="text-xs text-slate-400">{dataset.row_count} rows</p>
+                  </div>
                 </div>
 
-                <div className="space-y-3 rounded-2xl border border-white/10 bg-black/20 p-4">
-                  <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-200">Weights</h2>
-                  <label className="block text-sm text-slate-200">
-                    Temperature
-                    <input className="input mt-1" type="number" step="0.1" value={temperatureWeight}
-                      onChange={(e) => setTemperatureWeight(Number(e.target.value))} />
-                  </label>
-                  <label className="block text-sm text-slate-200">
-                    Humidity
-                    <input className="input mt-1" type="number" step="0.1" value={humidityWeight}
-                      onChange={(e) => setHumidityWeight(Number(e.target.value))} />
-                  </label>
-                  <label className="block text-sm text-slate-200">
-                    Wind speed
-                    <input className="input mt-1" type="number" step="0.1" value={windWeight}
-                      onChange={(e) => setWindWeight(Number(e.target.value))} />
-                  </label>
+                <div className="space-y-3 rounded-xl border border-white/[0.07] bg-black/20 p-4">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Weights</p>
+                  {[
+                    { label: "Temperature", value: temperatureWeight, set: setTemperatureWeight },
+                    { label: "Humidity", value: humidityWeight, set: setHumidityWeight },
+                    { label: "Wind speed", value: windWeight, set: setWindWeight },
+                  ].map(({ label, value, set }) => (
+                    <label key={label} className="flex items-center justify-between gap-3 text-xs text-slate-300">
+                      <span>{label}</span>
+                      <input
+                        className="input w-20 text-center"
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        max="1"
+                        value={value}
+                        onChange={(e) => set(Number(e.target.value))}
+                      />
+                    </label>
+                  ))}
                 </div>
 
-                <button className="button" onClick={handleCsvRisk} disabled={loading}>
-                  {loading ? "Running..." : "Run risk"}
+                <button className="button w-full" onClick={handleCsvRisk} disabled={loading}>
+                  {loading ? <><Spinner /> Running…</> : "Run Risk"}
                 </button>
-              </>
+              </div>
             )}
           </div>
         )}
 
         {error && (
-          <div className="rounded-xl border border-rose-300/30 bg-rose-300/10 px-3 py-2 text-sm text-rose-200">
+          <div className="animate-fade-in rounded-xl border border-rose-400/25 bg-rose-400/10 px-3.5 py-2.5 text-sm text-rose-300">
             {error}
           </div>
         )}
       </section>
 
+      {/* Result */}
       {runResult ? (
         <ResultCard run={runResult} />
       ) : (
-        <section className="panel flex min-h-[260px] items-center justify-center text-center text-sm text-slate-400">
-          {mode === "location"
-            ? "Enter coordinates and click Get fire risk."
-            : "Upload a dataset and run risk to see results."}
+        <section className="panel flex min-h-[280px] flex-col items-center justify-center gap-3 text-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-2xl">
+            🔥
+          </div>
+          <p className="text-sm text-slate-500">
+            {mode === "location" ? "Enter coordinates to analyze fire risk." : "Upload a CSV to get started."}
+          </p>
         </section>
       )}
     </div>

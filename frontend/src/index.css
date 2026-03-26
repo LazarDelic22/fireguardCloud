@@ -27,15 +27,68 @@ h6 {
   font-family: var(--fg-font-title);
 }
 
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(22px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+.animate-fade-up {
+  animation: fadeUp 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s ease both;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.stagger-1 { animation-delay: 0.05s; }
+.stagger-2 { animation-delay: 0.1s; }
+.stagger-3 { animation-delay: 0.15s; }
+.stagger-4 { animation-delay: 0.2s; }
+
 .panel {
-  @apply rounded-2xl border border-white/10 bg-slate-900/70 p-6 shadow-xl shadow-black/20;
+  @apply rounded-2xl border border-white/10 bg-slate-900/60 p-6 shadow-xl shadow-black/30 backdrop-blur-sm;
 }
 
 .button {
-  @apply rounded-xl bg-gradient-to-r from-cyan-300 to-emerald-300 px-4 py-2 font-semibold text-slate-950 transition hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-50;
+  @apply inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-orange-500 to-amber-400 px-4 py-2.5 font-semibold text-white shadow-lg shadow-orange-500/20 transition-all duration-200 hover:scale-[1.02] hover:shadow-orange-500/35 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100;
+}
+
+.button-ghost {
+  @apply inline-flex items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/5 px-4 py-2.5 font-semibold text-slate-200 transition-all duration-200 hover:bg-white/10 hover:border-white/30 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50;
 }
 
 .input {
-  @apply w-full rounded-xl border border-white/20 bg-slate-950/40 px-3 py-2 text-slate-100 placeholder:text-slate-400 focus:border-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-300/30;
+  @apply w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-slate-100 placeholder:text-slate-500 transition-all duration-150 focus:border-orange-400/60 focus:outline-none focus:ring-2 focus:ring-orange-400/20;
 }
 
+.badge-low {
+  @apply inline-flex items-center rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-widest text-emerald-300;
+}
+
+.badge-medium {
+  @apply inline-flex items-center rounded-full border border-amber-400/30 bg-amber-400/10 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-widest text-amber-300;
+}
+
+.badge-high {
+  @apply inline-flex items-center rounded-full border border-rose-400/30 bg-rose-400/10 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-widest text-rose-300;
+}

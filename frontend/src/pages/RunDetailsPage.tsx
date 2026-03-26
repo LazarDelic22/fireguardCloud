@@ -1,7 +1,23 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
+import { RiskGauge } from "../components/ResultCard";
 import { getRun, type RunRecord } from "../api/client";
+
+function RiskBadge({ level }: { level: RunRecord["risk_level"] }) {
+  const cls =
+    level === "low" ? "badge-low" : level === "medium" ? "badge-medium" : "badge-high";
+  return <span className={cls}>{level}</span>;
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">{label}</p>
+      <p className="mt-1 text-sm text-slate-100">{value}</p>
+    </div>
+  );
+}
 
 export function RunDetailsPage() {
   const { runId } = useParams<{ runId: string }>();
@@ -10,106 +26,154 @@ export function RunDetailsPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const currentRunId = runId;
-    if (!currentRunId) {
-      setError("Run ID is missing.");
-      setLoading(false);
-      return;
-    }
-
-    async function loadRun() {
+    if (!runId) { setError("Run ID missing."); setLoading(false); return; }
+    async function load() {
       setLoading(true);
       setError("");
       try {
-        const data = await getRun(currentRunId!);
-        setRun(data);
-      } catch (loadError) {
-        setError(loadError instanceof Error ? loadError.message : "Failed to load run details.");
+        setRun(await getRun(runId!));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to load run.");
       } finally {
         setLoading(false);
       }
     }
-    void loadRun();
+    void load();
   }, [runId]);
 
   const isFrcm = run?.explain.model === "dynamic-frcm-simple";
+  const maxContrib = run?.explain.top_factors.length
+    ? Math.max(...run.explain.top_factors.map((f) => f.contribution))
+    : 1;
 
   return (
-    <section className="panel space-y-5">
-      <div className="flex items-start justify-between">
+    <div className="space-y-5 animate-fade-up">
+      {/* Top bar */}
+      <div className="flex items-center justify-between">
         <div>
-          <p className="text-xs uppercase tracking-wider text-cyan-300">Run details</p>
-          <h1 className="text-3xl font-bold text-white">Run #{runId}</h1>
+          <p className="text-xs font-semibold uppercase tracking-widest text-orange-400/70">Run Details</p>
+          <h1 className="mt-0.5 text-2xl font-bold text-white">#{runId}</h1>
         </div>
-        <Link className="rounded-lg border border-white/20 px-3 py-2 text-sm text-slate-200 hover:bg-white/10" to="/history">
-          Back
+        <Link
+          className="rounded-xl border border-white/15 bg-white/5 px-3.5 py-2 text-sm text-slate-300 transition hover:bg-white/10"
+          to="/history"
+        >
+          ← Back
         </Link>
       </div>
 
-      {loading && <p className="text-sm text-slate-400">Loading run...</p>}
-      {error && <p className="rounded-xl border border-rose-300/30 bg-rose-300/10 px-3 py-2 text-sm text-rose-200">{error}</p>}
+      {loading && (
+        <div className="flex items-center gap-2 text-sm text-slate-400">
+          <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          Loading…
+        </div>
+      )}
+
+      {error && (
+        <p className="rounded-xl border border-rose-400/25 bg-rose-400/10 px-3.5 py-2.5 text-sm text-rose-300">
+          {error}
+        </p>
+      )}
 
       {run && (
-        <div className="grid gap-4 md:grid-cols-2">
-          {/* Left: core result */}
-          <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-slate-200 space-y-3">
-            <p className="text-xs uppercase tracking-wider text-slate-400">Result</p>
-            <p className="text-5xl font-bold text-cyan-200">{run.risk_score.toFixed(3)}</p>
-            <p className="text-sm uppercase tracking-wide text-slate-300">{run.risk_level} risk</p>
+        <div className="grid gap-5 md:grid-cols-2">
+          {/* Left: gauge + core info */}
+          <div className="panel space-y-5 animate-fade-in">
+            <RiskGauge score={run.risk_score} level={run.risk_level} />
 
-            {/* Location run */}
-            {isFrcm && run.lat != null && run.lon != null && (
-              <>
-                <p className="text-xs text-slate-400">Location</p>
-                <p className="text-sm">{run.lat.toFixed(4)}, {run.lon.toFixed(4)}</p>
-                <p className="text-xs text-slate-400">Model</p>
-                <p className="text-sm">dynamic-frcm-simple</p>
-                <p className="text-xs text-slate-400">Source</p>
-                <p className="text-sm">MET Norway Locationforecast</p>
-              </>
-            )}
+            <div className="grid grid-cols-2 gap-x-4 gap-y-4 rounded-xl border border-white/[0.06] bg-black/20 p-4">
+              <Stat label="Risk level" value={run.risk_level.toUpperCase()} />
+              <Stat label="Score" value={run.risk_score.toFixed(4)} />
+              <Stat
+                label="Created"
+                value={new Date(run.created_at).toLocaleString()}
+              />
+              {isFrcm && run.lat != null && run.lon != null && (
+                <Stat
+                  label="Location"
+                  value={`${run.lat.toFixed(4)}, ${run.lon.toFixed(4)}`}
+                />
+              )}
+              {!isFrcm && run.dataset_id && (
+                <div className="col-span-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Dataset ID</p>
+                  <p className="mt-1 break-all font-mono text-xs text-slate-300">{run.dataset_id}</p>
+                </div>
+              )}
+            </div>
 
-            {/* CSV run */}
-            {!isFrcm && run.dataset_id && (
-              <>
-                <p className="text-xs text-slate-400">Dataset ID</p>
-                <p className="font-mono text-xs break-all">{run.dataset_id}</p>
-              </>
-            )}
-
-            <p className="text-xs text-slate-400">Created</p>
-            <p className="text-sm">{new Date(run.created_at).toLocaleString()}</p>
+            <RiskBadge level={run.risk_level} />
           </div>
 
-          {/* Right: model-specific detail */}
-          <div className="rounded-2xl border border-white/10 bg-black/20 p-4 space-y-3">
+          {/* Right: model details */}
+          <div className="panel space-y-4 animate-fade-in stagger-1">
             {isFrcm ? (
               <>
-                <p className="text-xs uppercase tracking-wider text-slate-400">FRCM forecast summary</p>
-                <div className="space-y-2 text-sm text-slate-200">
-                  <p>Min time to flashover: <span className="text-white font-semibold">{run.explain.min_ttf_hours?.toFixed(2)} h</span></p>
-                  <p>Mean time to flashover: <span className="text-white font-semibold">{run.explain.mean_ttf_hours?.toFixed(2)} h</span></p>
-                  <p className="text-xs text-slate-400 mt-2">Lower TTF = higher fire risk.</p>
-                  <p className="text-xs text-slate-400">Based on {run.explain.record_count} weather data points.</p>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                  FRCM forecast
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-center">
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Min TTF</p>
+                    <p className="mt-2 text-3xl font-bold text-white">
+                      {run.explain.min_ttf_hours?.toFixed(1)}
+                    </p>
+                    <p className="text-xs text-slate-500">hours</p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-center">
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Mean TTF</p>
+                    <p className="mt-2 text-3xl font-bold text-white">
+                      {run.explain.mean_ttf_hours?.toFixed(1)}
+                    </p>
+                    <p className="text-xs text-slate-500">hours</p>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-white/[0.06] bg-black/20 p-3 space-y-2">
+                  <Stat label="Model" value="dynamic-frcm-simple" />
+                  <Stat label="Source" value="MET Norway Locationforecast 2.0" />
+                  <Stat
+                    label="Data points"
+                    value={`${run.explain.record_count ?? "—"} weather records`}
+                  />
                 </div>
               </>
             ) : (
               <>
-                <p className="text-xs uppercase tracking-wider text-slate-400">Top contributing factors</p>
-                <ul className="space-y-2">
-                  {run.explain.top_factors.map((factor) => (
-                    <li key={factor.column} className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-100">
-                      <p className="font-semibold">{factor.column}</p>
-                      <p className="text-xs text-slate-300">contribution {factor.contribution.toFixed(4)}</p>
-                      <p className="text-xs text-slate-400">weight {factor.weight.toFixed(2)}</p>
-                    </li>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                  Contributing factors
+                </p>
+                <div className="space-y-3">
+                  {run.explain.top_factors.map((factor, i) => (
+                    <div key={factor.column} className={`animate-fade-up stagger-${Math.min(i + 1, 4)}`}>
+                      <div className="mb-1.5 flex items-center justify-between">
+                        <span className="text-sm font-medium capitalize text-slate-200">
+                          {factor.column.replace(/_/g, " ")}
+                        </span>
+                        <span className="text-xs text-slate-500">w={factor.weight.toFixed(2)}</span>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-white/[0.08]">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-orange-500 to-amber-400"
+                          style={{
+                            width: `${(factor.contribution / maxContrib) * 100}%`,
+                            transition: `width 1s cubic-bezier(0.34, 1.2, 0.64, 1) ${i * 0.12}s`,
+                          }}
+                        />
+                      </div>
+                      <p className="mt-1 text-[10px] text-slate-500">
+                        contribution {factor.contribution.toFixed(4)}
+                      </p>
+                    </div>
                   ))}
-                </ul>
+                </div>
               </>
             )}
           </div>
         </div>
       )}
-    </section>
+    </div>
   );
 }
