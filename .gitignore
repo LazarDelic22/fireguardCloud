@@ -16,3 +16,5 @@ frontend/tailwind.config.d.ts
 *.db
 rewrite_history.sh
 .claude/
+.ssh/
+*.pem

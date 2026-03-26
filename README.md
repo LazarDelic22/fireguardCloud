@@ -1,180 +1,152 @@
-# FireGuardCloud - Sprint 3
+# FireGuard Cloud
 
-Sprint 3 turns FireGuard into a local end-to-end prototype:
+A cloud-based fire risk assessment service built across three sprints. It fetches live weather forecasts from MET Norway, runs them through the dynamic-frcm-simple fire risk model, and exposes the results through a REST API and a React dashboard.
 
-- FastAPI backend with dataset upload, deterministic risk computation, and run history
-- SQLite persistence for datasets and runs
-- React + TypeScript dashboard for upload, risk run, and history views
-- Docker Compose to run backend + frontend together
+## What it does
+
+- **Location-based risk**: send a latitude/longitude, get live weather from MET Norway, run it through the FRCM model, and receive a fire risk score with TTF (time to flashover) estimates
+- **CSV-based risk**: upload a CSV with weather columns and get a deterministic risk score
+- **Run history**: all runs are stored in SQLite with full parameters and explain data
+- **Real-time events**: subscribe to `/events` (SSE) to receive notifications when new risk runs are created
+- **Optional API key auth**: can be enabled via environment variable
 
 ## Project structure
 
-```text
+```
 backend/
   app/
-    main.py
-    db.py
-    schemas.py
-    storage.py
-    auth.py
-    risk_engine.py
+    main.py          - FastAPI routes
+    db.py            - SQLAlchemy models (Dataset, WeatherRecord, Run)
+    schemas.py       - Pydantic request/response models
+    storage.py       - DB helpers and response mapping
+    risk_engine.py   - Deterministic CSV risk engine
+    frcm_service.py  - FRCM model adapter
+    met_service.py   - MET Norway Locationforecast 2.0 client
+    events.py        - SSE broadcast system
+    auth.py          - Optional API key middleware
   tests/
 
 frontend/
   src/
-    pages/
-    components/
-    api/
+    pages/           - Dashboard, History, RunDetails
+    components/      - ResultCard, NavBar
+    api/client.ts    - API client
+
+third_party/
+  dynamic-frcm-simple/  - FRCM model (git submodule)
 
 docker-compose.yml
+.github/workflows/ci.yml
 ```
 
-Backend is still kept fairly small:
+## Running locally
 
-- `app/main.py`: FastAPI app setup and API routes
-- `app/db.py`: SQLite models and database session setup
-- `app/schemas.py`: request and response models
-- `app/storage.py`: dataset file handling and response mapping
-- `app/risk_engine.py`: deterministic CSV parsing and risk scoring
-- `app/auth.py`: optional API key middleware
-
-## Backend local run
-
-```powershell
+**Backend:**
+```bash
 cd backend
 python -m venv .venv
-.venv\Scripts\python.exe -m pip install -r requirements.txt
-.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+.venv/Scripts/python.exe -m pip install -r requirements.txt
+set PYTHONPATH=../third_party/dynamic-frcm-simple/src
+.venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8000
 ```
 
-Backend URL: `http://localhost:8000`
-
-## Frontend local run
-
-```powershell
+**Frontend:**
+```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-Frontend URL: `http://localhost:5173`
-
-Set API base URL with:
-
-```powershell
-copy .env.example .env
-```
-
-`frontend/.env`:
-
-```text
-VITE_API_BASE_URL=http://localhost:8000
-```
-
-## Docker run
-
-From repo root:
-
-```powershell
+**Docker Compose (recommended):**
+```bash
 docker compose up --build
 ```
 
 - Backend: `http://localhost:8000`
 - Frontend: `http://localhost:5173`
+- API docs: `http://localhost:8000/docs`
 
-## API usage examples (curl)
+## API examples
 
-### 1) Health
-
+### Health check
 ```bash
 curl http://localhost:8000/health
 ```
 
-### 2) Upload dataset
-
+### Location-based risk (MET + FRCM)
 ```bash
-curl -X POST "http://localhost:8000/datasets" \
-  -F "file=@third_party/dynamic-frcm-simple/bergen_2026_01_09.csv"
-```
-
-Save `dataset_id` from the response.
-
-### 3) Run risk with existing dataset
-
-```bash
-curl -X POST "http://localhost:8000/risk" \
+curl -X POST http://localhost:8000/risk/location \
   -H "Content-Type: application/json" \
-  -d "{\"dataset_id\":\"<dataset_id>\",\"params\":{\"weights\":{\"temperature\":0.5,\"humidity\":0.3,\"wind_speed\":0.2}}}"
+  -d '{"lat": 60.39, "lon": 5.32}'
 ```
 
-### 4) Run risk with direct file upload
+Returns risk score, level, and FRCM TTF estimates.
 
+### CSV-based risk
 ```bash
-curl -X POST "http://localhost:8000/risk" \
-  -F "file=@third_party/dynamic-frcm-simple/bergen_2026_01_09.csv" \
-  -F "params={\"weights\":{\"temperature\":0.4,\"humidity\":0.4,\"wind_speed\":0.2}}"
+# Upload a dataset
+curl -X POST http://localhost:8000/datasets \
+  -F "file=@third_party/dynamic-frcm-simple/bergen_2026_01_09.csv"
+
+# Run risk on the dataset (use dataset_id from above)
+curl -X POST http://localhost:8000/risk \
+  -H "Content-Type: application/json" \
+  -d '{"dataset_id": "<id>", "params": {}}'
 ```
 
-### 5) List runs
-
+### Run history
 ```bash
 curl http://localhost:8000/runs
+curl http://localhost:8000/runs/1
 ```
 
-## Sprint 3 evidence (local run)
-
-Example successful UI run with `bergen_2026_01_09.csv`:
-
-- Upload accepted and stored with generated `dataset_id`
-- Row count: `132`
-- Risk result:
-  - `risk_score: 0.429`
-  - `risk_level: medium`
-- Top factors shown in UI:
-  - `temperature` contribution `0.1928`
-  - `humidity` contribution `0.1721`
-  - `wind_speed` contribution `0.0640`
-
-This confirms upload -> compute -> persist -> display flow is working end to end.
-
-## Troubleshooting
-
-If frontend shows `Failed to fetch`:
-
-1. Start backend first on `http://localhost:8000`
-2. Check `frontend/.env` has `VITE_API_BASE_URL=http://localhost:8000`
-3. Restart frontend dev server after changing `.env`
+### Subscribe to events (SSE)
+```bash
+curl -N http://localhost:8000/events
+```
 
 ## How risk is computed
 
-Risk engine is deterministic and simple:
+**Location path (FRCM model):**
+1. Fetch 48-hour forecast from MET Norway Locationforecast 2.0
+2. Convert to WeatherData objects and run through dynamic-frcm-simple
+3. Map minimum TTF to risk: `risk_score = 1 - (min_ttf / 10)`, capped at 1
+4. Thresholds: TTF < 3h = high, 3–5h = medium, > 5h = low
 
-1. Parse CSV and validate required columns:
-   - `temperature`, `humidity`, `wind_speed`
-2. Normalize selected numeric columns to `[0, 1]`
-3. Compute weighted sum and map to risk score `[0, 1]`
-4. Map score to level:
-   - `< 0.33` -> `low`
-   - `< 0.66` -> `medium`
-   - otherwise -> `high`
-5. Return top contributing factors in `explain.top_factors`
+**CSV path (deterministic engine):**
+1. Parse CSV, validate columns (temperature, humidity, wind_speed)
+2. Normalize columns to [0, 1] and compute weighted sum
+3. Thresholds: score < 0.33 = low, < 0.66 = medium, otherwise high
 
-## Optional API key protection
+## Cloud deployment (NREC)
 
-Environment variables:
+The app runs on an NREC VM (OSL region) at `158.37.63.124`.
 
-- `FIREGUARD_AUTH_ENABLED=true|false`
-- `FIREGUARD_API_KEY=<secret>`
+- Backend: `http://158.37.63.124:8000`
+- Frontend: `http://158.37.63.124:5173`
+- API docs: `http://158.37.63.124:8000/docs`
 
-When enabled, send key with header:
+The CI/CD pipeline (`.github/workflows/ci.yml`) runs tests and a Docker build on every push. On push to `main` it deploys automatically via SSH using these repository secrets:
 
-```text
-X-API-Key: <secret>
-```
+| Secret | Value |
+|--------|-------|
+| `NREC_HOST` | `158.37.63.124` |
+| `NREC_USER` | `ubuntu` |
+| `NREC_SSH_KEY` | contents of `fireguard-key.pem` |
 
-## Backend tests
+## Tests
 
-```powershell
+```bash
 cd backend
-.venv\Scripts\python.exe -m pytest
+.venv/Scripts/python.exe -m pytest tests/ -v
 ```
+
+## Optional API key auth
+
+Set in environment or `.env`:
+```
+FIREGUARD_AUTH_ENABLED=true
+FIREGUARD_API_KEY=mysecretkey
+```
+
+Then include header `X-API-Key: mysecretkey` with requests.
