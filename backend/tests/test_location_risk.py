@@ -62,6 +62,36 @@ def test_location_risk_invalid_coords_returns_422(client) -> None:
     assert response.status_code == 422
 
 
+def _make_csv(tmp_path_factory) -> bytes:
+    """Minimal CSV with 48 rows that FRCM can process."""
+    lines = ["temperature,humidity,wind_speed"]
+    for _ in range(48):
+        lines.append("5.0,70.0,3.0")
+    return "\n".join(lines).encode()
+
+
+def test_csv_risk_uses_frcm(client, tmp_path) -> None:
+    """POST /risk with a CSV dataset should use FRCM and return TTF explain data."""
+    csv_bytes = b"temperature,humidity,wind_speed\n" + b"5.0,70.0,3.0\n" * 48
+
+    upload = client.post(
+        "/datasets",
+        files={"file": ("test.csv", csv_bytes, "text/csv")},
+    )
+    assert upload.status_code == 201, upload.text
+    dataset_id = upload.json()["dataset_id"]
+
+    response = client.post("/risk", json={"dataset_id": dataset_id, "params": {}})
+    assert response.status_code == 200, response.text
+    data = response.json()
+
+    assert 0.0 <= data["risk_score"] <= 1.0
+    assert data["risk_level"] in {"low", "medium", "high"}
+    assert data["explain"]["model"] == "dynamic-frcm-simple"
+    assert data["explain"]["min_ttf_hours"] is not None
+    assert data["dataset_id"] == dataset_id
+
+
 def test_events_endpoint_is_reachable(client) -> None:
     """GET /events should return a streaming text/event-stream response."""
     async def _finite_stream():

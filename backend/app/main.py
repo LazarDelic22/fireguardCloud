@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import json
 from contextlib import asynccontextmanager
 from typing import Any
@@ -14,7 +15,7 @@ from app.db import Dataset, Run, init_db, open_db
 from app.events import broadcast, event_stream
 from app.frcm_service import run_frcm
 from app.met_service import MetServiceError, fetch_forecast
-from app.risk_engine import RiskEngineError, compute_risk, parse_csv
+from app.risk_engine import RiskEngineError, parse_csv
 from app.schemas import DatasetOut, LocationRiskRequest, RiskJsonRequest, RunOut
 from app.storage import (
     create_dataset_from_bytes,
@@ -34,7 +35,7 @@ app = FastAPI(title="FireGuardCloud API", version="0.4.0", lifespan=lifespan)
 app.add_middleware(ApiKeyMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://158.37.63.124:5173"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -121,8 +122,24 @@ async def create_risk_run(request: Request) -> RunOut:
 
         try:
             records = parse_csv(dataset.stored_path)
-            result = compute_risk(records, params)
         except RiskEngineError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        # Convert CSV rows to weather points with synthetic hourly timestamps
+        # so the FRCM model can process them the same way as live MET data.
+        _base = datetime.datetime(2026, 1, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
+        weather_points = [
+            {
+                "timestamp": _base + datetime.timedelta(hours=i),
+                "temperature": float(r["temperature"]),
+                "humidity": float(r["humidity"]),
+                "wind_speed": float(r["wind_speed"]),
+            }
+            for i, r in enumerate(records)
+        ]
+        try:
+            result = run_frcm(weather_points)
+        except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         run = Run(
