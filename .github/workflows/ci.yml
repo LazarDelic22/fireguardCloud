@@ -54,9 +54,11 @@ jobs:
   # Deploy to NREC VM on push to main
   #
   # Required repository secrets (Settings → Secrets → Actions):
-  #   NREC_HOST     — public IP or hostname of your NREC instance
-  #   NREC_USER     — SSH user (typically "ubuntu" or "debian")
-  #   NREC_SSH_KEY  — contents of the private key used when creating the instance
+  #   NREC_HOST           — public IP or hostname of your NREC instance
+  #   NREC_USER           — SSH user (typically "ubuntu" or "debian")
+  #   NREC_SSH_KEY        — contents of the private key used when creating the instance
+  #   POSTGRES_PASSWORD   — password for the Postgres container
+  #   FIREGUARD_API_KEY   — shared API key (also baked into frontend bundle)
   # -------------------------------------------------------------------------
   deploy:
     runs-on: ubuntu-latest
@@ -70,20 +72,33 @@ jobs:
 
       - name: Deploy to NREC via SSH
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          FIREGUARD_API_KEY: ${{ secrets.FIREGUARD_API_KEY }}
+          FIREGUARD_JWT_SECRET: ${{ secrets.FIREGUARD_JWT_SECRET }}
+          NREC_HOST: ${{ secrets.NREC_HOST }}
         with:
           host: ${{ secrets.NREC_HOST }}
           username: ${{ secrets.NREC_USER }}
           key: ${{ secrets.NREC_SSH_KEY }}
+          envs: POSTGRES_PASSWORD,FIREGUARD_API_KEY,FIREGUARD_JWT_SECRET,NREC_HOST
           script: |
             cd ~/fireguard-cloud
             git fetch origin
             git reset --hard origin/main
             git submodule update --init --recursive
+            # Write fresh .env for docker-compose variable substitution
+            cat > .env <<EOF
+            POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+            FIREGUARD_API_KEY=${FIREGUARD_API_KEY}
+            FIREGUARD_JWT_SECRET=${FIREGUARD_JWT_SECRET}
+            VITE_API_BASE_URL=http://${NREC_HOST}:8000
+            EOF
             docker compose down
             docker compose up -d --build
             docker compose ps
 
       - name: Health check
         run: |
-          sleep 15
+          sleep 20
           curl --fail http://${{ secrets.NREC_HOST }}:8000/health

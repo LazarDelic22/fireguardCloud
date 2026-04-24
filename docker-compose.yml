@@ -1,4 +1,20 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: fireguard-postgres
+    environment:
+      POSTGRES_USER: fireguard
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: fireguard
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fireguard -d fireguard"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   backend:
     build:
       context: .                        # project root so Dockerfile can reach third_party/
@@ -7,11 +23,16 @@ services:
     ports:
       - "8000:8000"
     environment:
-      FIREGUARD_DATABASE_URL: "sqlite:///./data/fireguard.db"
+      FIREGUARD_DATABASE_URL: "postgresql+psycopg2://fireguard:${POSTGRES_PASSWORD}@postgres:5432/fireguard"
       FIREGUARD_DATA_DIR: "./data"
-      FIREGUARD_AUTH_ENABLED: "false"
-      # Set FIREGUARD_API_KEY to enable key-based auth (e.g. in .env or CI secrets)
+      FIREGUARD_AUTH_ENABLED: "true"
+      FIREGUARD_API_KEY: ${FIREGUARD_API_KEY}
+      FIREGUARD_JWT_SECRET: ${FIREGUARD_JWT_SECRET}
+      FIREGUARD_SCHEDULER_ENABLED: "true"
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
       - ./backend/data:/app/data
 
@@ -21,7 +42,11 @@ services:
     ports:
       - "5173:5173"
     environment:
-      VITE_API_BASE_URL: "http://158.37.63.124:8000"
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+      VITE_API_KEY: ${FIREGUARD_API_KEY}
     restart: unless-stopped
     depends_on:
       - backend
+
+volumes:
+  postgres_data:

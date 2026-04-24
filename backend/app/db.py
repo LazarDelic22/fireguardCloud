@@ -4,7 +4,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, create_engine
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 
 
@@ -26,6 +26,20 @@ def utc_now() -> datetime:
 
 class Base(DeclarativeBase):
     pass
+
+
+class User(Base):
+    """A registered user. Passwords are stored as bcrypt hashes — never plaintext."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    password_hash: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    datasets: Mapped[list["Dataset"]] = relationship(back_populates="user")
+    runs: Mapped[list["Run"]] = relationship(back_populates="user")
 
 
 class WeatherRecord(Base):
@@ -51,12 +65,14 @@ class Dataset(Base):
     __tablename__ = "datasets"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     stored_path: Mapped[str] = mapped_column(Text, nullable=False)
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     row_count: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
+    user: Mapped["User | None"] = relationship(back_populates="datasets")
     runs: Mapped[list["Run"]] = relationship(back_populates="dataset")
 
 
@@ -74,13 +90,18 @@ class Run(Base):
     weather_record_id: Mapped[int | None] = mapped_column(
         ForeignKey("weather_records.id"), nullable=True
     )
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     params_json: Mapped[str] = mapped_column(Text, nullable=False)
     risk_score: Mapped[float] = mapped_column(Float, nullable=False)
     risk_level: Mapped[str] = mapped_column(String(16), nullable=False)
     explain_json: Mapped[str] = mapped_column(Text, nullable=False)
+    # "manual" when triggered by an HTTP request, "scheduled" when added by the
+    # background scheduler. Used by the frontend to style markers differently.
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="manual")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
     dataset: Mapped["Dataset | None"] = relationship(back_populates="runs")
+    user: Mapped["User | None"] = relationship(back_populates="runs")
     weather_record: Mapped["WeatherRecord | None"] = relationship(back_populates="runs")
 
 
@@ -114,10 +135,49 @@ def get_session_factory():
     return _session_factory
 
 
+def _ensure_schema_compatibility() -> None:
+    """Apply lightweight additive migrations for older databases.
+
+    The project still uses `create_all()` instead of a full migration tool. This
+    helper makes new nullable/additive columns appear on an existing DB so local
+    upgrades and the deployed Postgres instance do not require a manual reset.
+    """
+    engine = get_engine()
+    with engine.begin() as conn:
+        dialect = conn.dialect.name
+        inspector = inspect(conn)
+        table_names = set(inspector.get_table_names())
+
+        if "runs" in table_names:
+            run_columns = {column["name"] for column in inspector.get_columns("runs")}
+            if "source" not in run_columns:
+                conn.execute(
+                    text("ALTER TABLE runs ADD COLUMN source VARCHAR(16) NOT NULL DEFAULT 'manual'")
+                )
+            if "user_id" not in run_columns:
+                if dialect == "postgresql":
+                    conn.execute(
+                        text("ALTER TABLE runs ADD COLUMN user_id INTEGER REFERENCES users(id)")
+                    )
+                else:
+                    conn.execute(text("ALTER TABLE runs ADD COLUMN user_id INTEGER"))
+
+        if "datasets" in table_names:
+            dataset_columns = {column["name"] for column in inspector.get_columns("datasets")}
+            if "user_id" not in dataset_columns:
+                if dialect == "postgresql":
+                    conn.execute(
+                        text("ALTER TABLE datasets ADD COLUMN user_id INTEGER REFERENCES users(id)")
+                    )
+                else:
+                    conn.execute(text("ALTER TABLE datasets ADD COLUMN user_id INTEGER"))
+
+
 def init_db() -> None:
     get_data_dir().mkdir(parents=True, exist_ok=True)
     get_datasets_dir().mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=get_engine())
+    _ensure_schema_compatibility()
 
 
 def reset_db_for_tests() -> None:

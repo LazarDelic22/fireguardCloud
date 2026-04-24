@@ -1,4 +1,5 @@
 @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Manrope:wght@400;500;600;700&display=swap");
+@import "leaflet/dist/leaflet.css";
 
 @tailwind base;
 @tailwind components;
@@ -16,6 +17,21 @@
 body {
   margin: 0;
   font-family: var(--fg-font-body);
+  color: rgb(241 245 249);
+  background:
+    radial-gradient(circle at top left, rgba(249, 115, 22, 0.12), transparent 24%),
+    radial-gradient(circle at 85% 15%, rgba(245, 158, 11, 0.08), transparent 18%),
+    linear-gradient(180deg, rgba(2, 6, 23, 1), rgba(3, 7, 18, 1));
+  background-attachment: fixed;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+::selection {
+  background: rgba(249, 115, 22, 0.28);
+  color: white;
 }
 
 h1,

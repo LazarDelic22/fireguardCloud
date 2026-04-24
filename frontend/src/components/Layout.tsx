@@ -1,5 +1,7 @@
 import type { PropsWithChildren } from "react";
-import { Link, NavLink } from "react-router-dom";
+import { Link, NavLink, useNavigate } from "react-router-dom";
+
+import { useAuth } from "../auth/AuthContext";
 
 function FlameIcon() {
   return (
@@ -21,6 +23,23 @@ function FlameIcon() {
 }
 
 export function Layout({ children }: PropsWithChildren) {
+  const { user, logout, loading } = useAuth();
+  const navigate = useNavigate();
+
+  const navItems: { to: string; label: string; end?: boolean; protected?: boolean }[] = user
+    ? [
+        { to: "/", label: "Home", end: true },
+        { to: "/dashboard", label: "Dashboard" },
+        { to: "/map", label: "Map" },
+        { to: "/history", label: "History" },
+      ]
+    : [{ to: "/", label: "Home", end: true }];
+
+  function handleLogout() {
+    logout();
+    navigate("/", { replace: true });
+  }
+
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-slate-950 text-slate-100">
       {/* Ambient background glows */}
@@ -39,18 +58,12 @@ export function Layout({ children }: PropsWithChildren) {
             </span>
             <div className="leading-none">
               <p className="text-[15px] font-semibold tracking-tight">FireGuard</p>
-              <p className="mt-0.5 text-[10px] text-slate-500">Cloud · Sprint 3</p>
+              <p className="mt-0.5 text-[10px] text-slate-500">Cloud · MVP</p>
             </div>
           </Link>
 
           <nav className="flex items-center gap-1">
-            {(
-              [
-                { to: "/", label: "Home", end: true },
-                { to: "/dashboard", label: "Dashboard" },
-                { to: "/history", label: "History" },
-              ] as { to: string; label: string; end?: boolean }[]
-            ).map(({ to, label, end }) => (
+            {navItems.map(({ to, label, end }) => (
               <NavLink
                 key={to}
                 to={to}
@@ -66,6 +79,38 @@ export function Layout({ children }: PropsWithChildren) {
                 {label}
               </NavLink>
             ))}
+
+            <div className="mx-2 h-6 w-px bg-white/[0.08]" />
+
+            {loading ? null : user ? (
+              <div className="flex items-center gap-2">
+                <span className="hidden md:inline-flex items-center gap-1.5 rounded-lg bg-white/[0.05] px-2.5 py-1.5 text-xs text-slate-300">
+                  <span className="inline-block h-2 w-2 rounded-full bg-emerald-400" />
+                  <span className="font-medium">{user.username}</span>
+                </span>
+                <button
+                  onClick={handleLogout}
+                  className="rounded-lg px-3 py-2 text-sm font-medium text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-slate-100"
+                >
+                  Log out
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1">
+                <NavLink
+                  to="/login"
+                  className="rounded-lg px-3 py-2 text-sm font-medium text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-slate-100"
+                >
+                  Sign in
+                </NavLink>
+                <NavLink
+                  to="/register"
+                  className="rounded-lg bg-orange-500/90 px-3 py-2 text-sm font-semibold text-white transition-all hover:bg-orange-500 hover:shadow-lg hover:shadow-orange-500/25"
+                >
+                  Register
+                </NavLink>
+              </div>
+            )}
           </nav>
         </div>
       </header>

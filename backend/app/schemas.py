@@ -6,6 +6,23 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+class UserOut(BaseModel):
+    id: int
+    username: str
+    created_at: datetime
+
+
+class AuthRequest(BaseModel):
+    username: str = Field(..., min_length=3, max_length=64)
+    password: str = Field(..., min_length=6, max_length=128)
+
+
+class AuthResponse(BaseModel):
+    user: UserOut
+    access_token: str
+    token_type: str = "bearer"
+
+
 class DatasetOut(BaseModel):
     dataset_id: str
     filename: str
@@ -42,6 +59,17 @@ class ExplainOut(BaseModel):
     ttf_preview: list[dict[str, Any]] | None = None
 
 
+class WatchlistCity(BaseModel):
+    name: str
+    country: str
+    lat: float
+    lon: float
+    risk_level: str | None = None
+    risk_score: float | None = None
+    min_ttf_hours: float | None = None
+    updated_at: datetime | None = None
+
+
 class RunOut(BaseModel):
     run_id: int
     dataset_id: str | None  # None for location-based (MET) runs
@@ -50,6 +78,8 @@ class RunOut(BaseModel):
     params: dict[str, Any]
     explain: ExplainOut
     created_at: datetime
+    # "manual" or "scheduled"
+    source: str = "manual"
     # Present for location-based runs
     lat: float | None = None
     lon: float | None = None

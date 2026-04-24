@@ -1,12 +1,16 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
+import { useAuth } from "../auth/AuthContext";
 import { ResultCard } from "../components/ResultCard";
+import { WatchlistGrid } from "../components/WatchlistGrid";
 import {
+  listWatchlist,
   runRisk,
   runRiskFromLocation,
   uploadDataset,
   type DatasetRecord,
   type RunRecord,
+  type WatchlistRecord,
 } from "../api/client";
 
 type Mode = "location" | "csv";
@@ -24,7 +28,12 @@ function Spinner() {
   );
 }
 
+function cityKey(city: WatchlistRecord): string {
+  return `${city.name}:${city.lat.toFixed(4)}:${city.lon.toFixed(4)}`;
+}
+
 export function DashboardPage() {
+  const { user } = useAuth();
   const [mode, setMode] = useState<Mode>("location");
 
   const [lat, setLat] = useState("");
@@ -40,24 +49,54 @@ export function DashboardPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  function switchMode(m: Mode) {
-    setMode(m);
+  const [watchlist, setWatchlist] = useState<WatchlistRecord[]>([]);
+  const [watchlistLoading, setWatchlistLoading] = useState(true);
+  const [watchlistError, setWatchlistError] = useState("");
+  const [busyCityKey, setBusyCityKey] = useState<string | null>(null);
+
+  async function loadWatchlist(showSpinner = true) {
+    if (showSpinner) setWatchlistLoading(true);
+    setWatchlistError("");
+    try {
+      setWatchlist(await listWatchlist());
+    } catch (err) {
+      setWatchlistError(err instanceof Error ? err.message : "Failed to load city watchlist.");
+    } finally {
+      if (showSpinner) setWatchlistLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadWatchlist();
+  }, []);
+
+  function switchMode(nextMode: Mode) {
+    setMode(nextMode);
     setError("");
     setRunResult(null);
+  }
+
+  function applyCity(city: WatchlistRecord) {
+    setMode("location");
+    setLat(String(city.lat));
+    setLon(String(city.lon));
+    setError("");
   }
 
   async function handleLocationRisk(event: FormEvent) {
     event.preventDefault();
     const parsedLat = parseFloat(lat);
     const parsedLon = parseFloat(lon);
-    if (isNaN(parsedLat) || isNaN(parsedLon)) {
+    if (Number.isNaN(parsedLat) || Number.isNaN(parsedLon)) {
       setError("Enter valid coordinates.");
       return;
     }
     setError("");
     setLoading(true);
     try {
-      setRunResult(await runRiskFromLocation(parsedLat, parsedLon));
+      const result = await runRiskFromLocation(parsedLat, parsedLon);
+      setRunResult(result);
+      await loadWatchlist(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Request failed.");
     } finally {
@@ -67,7 +106,10 @@ export function DashboardPage() {
 
   async function handleUpload(event: FormEvent) {
     event.preventDefault();
-    if (!selectedFile) { setError("Choose a CSV file first."); return; }
+    if (!selectedFile) {
+      setError("Choose a CSV file first.");
+      return;
+    }
     setError("");
     setLoading(true);
     try {
@@ -97,172 +139,279 @@ export function DashboardPage() {
     }
   }
 
+  async function handleRecalculate(city: WatchlistRecord) {
+    setBusyCityKey(cityKey(city));
+    setError("");
+    try {
+      const result = await runRiskFromLocation(city.lat, city.lon);
+      setRunResult(result);
+      setLat(String(city.lat));
+      setLon(String(city.lon));
+      setMode("location");
+      await loadWatchlist(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Refresh failed.");
+    } finally {
+      setBusyCityKey(null);
+    }
+  }
+
+  const hottestCity = watchlist
+    .filter((city) => city.risk_score != null)
+    .slice()
+    .sort((left, right) => (right.risk_score ?? 0) - (left.risk_score ?? 0))[0];
+
   return (
-    <div className="grid gap-5 lg:grid-cols-[1.1fr_1fr] animate-fade-up">
-      {/* Controls */}
-      <section className="panel space-y-5">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-orange-400/70">FireGuard</p>
-          <h1 className="mt-0.5 text-2xl font-bold text-white">Risk Dashboard</h1>
+    <div className="space-y-6 animate-fade-up">
+      <section className="grid gap-5 lg:grid-cols-[1.15fr_0.85fr]">
+        <div className="panel space-y-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-orange-400/70">Operator Console</p>
+              <h1 className="mt-1 text-3xl font-bold tracking-tight text-white">Risk Dashboard</h1>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
+                Signed in as {user?.username}. Manual runs are stored to your account while scheduled watchlist cities stay globally visible.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-slate-300">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Current hotspot</p>
+              <p className="mt-1 font-semibold text-white">{hottestCity?.name ?? "Waiting for watchlist data"}</p>
+              <p className="text-xs text-slate-500">
+                {hottestCity?.risk_score != null ? `score ${hottestCity.risk_score.toFixed(3)}` : "No stored city runs yet"}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="rounded-2xl border border-emerald-400/15 bg-emerald-400/5 p-4">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-emerald-300/70">Low</p>
+              <p className="mt-2 text-sm leading-6 text-slate-300">Model only stays low when the minimum time to flashover remains at or above five hours.</p>
+            </div>
+            <div className="rounded-2xl border border-amber-400/15 bg-amber-400/5 p-4">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-amber-300/70">Medium</p>
+              <p className="mt-2 text-sm leading-6 text-slate-300">Medium begins once min TTF drops below five hours.</p>
+            </div>
+            <div className="rounded-2xl border border-rose-400/15 bg-rose-400/5 p-4">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-rose-300/70">High</p>
+              <p className="mt-2 text-sm leading-6 text-slate-300">High only appears once min TTF drops below three hours.</p>
+            </div>
+          </div>
         </div>
 
-        {/* Mode toggle */}
-        <div className="flex gap-1 rounded-xl border border-white/[0.07] bg-black/20 p-1">
-          <button
-            className={`flex-1 rounded-lg py-2 text-sm font-medium transition-all duration-200 ${
-              mode === "location"
-                ? "bg-orange-500/20 text-orange-300 border border-orange-500/25 shadow-sm"
-                : "text-slate-400 hover:text-slate-200"
-            }`}
-            onClick={() => switchMode("location")}
-          >
-            Location
-          </button>
-          <button
-            className={`flex-1 rounded-lg py-2 text-sm font-medium transition-all duration-200 ${
-              mode === "csv"
-                ? "bg-orange-500/20 text-orange-300 border border-orange-500/25 shadow-sm"
-                : "text-slate-400 hover:text-slate-200"
-            }`}
-            onClick={() => switchMode("csv")}
-          >
-            CSV Upload
-          </button>
+        <div className="panel space-y-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-orange-400/70">Quick pick</p>
+            <h2 className="mt-1 text-2xl font-bold text-white">Jump to a watched city</h2>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {watchlist.slice(0, 8).map((city) => (
+              <button
+                key={cityKey(city)}
+                type="button"
+                onClick={() => applyCity(city)}
+                className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm text-slate-300 transition-colors hover:border-orange-400/30 hover:bg-orange-400/10 hover:text-white"
+              >
+                {city.name}
+              </button>
+            ))}
+          </div>
+
+          <p className="text-sm leading-6 text-slate-400">
+            Select a tracked city to prefill the location form, or go straight to the map when you want a free-click run anywhere in the world.
+          </p>
         </div>
+      </section>
 
-        {/* Location form */}
-        {mode === "location" && (
-          <form className="space-y-4 animate-fade-in" onSubmit={handleLocationRisk}>
-            <div className="grid grid-cols-2 gap-3">
-              <label className="block text-xs font-medium text-slate-400">
-                Latitude
-                <input
-                  className="input mt-1.5"
-                  type="number"
-                  step="0.0001"
-                  placeholder="60.3913"
-                  value={lat}
-                  onChange={(e) => setLat(e.target.value)}
-                  required
-                />
-              </label>
-              <label className="block text-xs font-medium text-slate-400">
-                Longitude
-                <input
-                  className="input mt-1.5"
-                  type="number"
-                  step="0.0001"
-                  placeholder="5.3221"
-                  value={lon}
-                  onChange={(e) => setLon(e.target.value)}
-                  required
-                />
-              </label>
-            </div>
-
-            {/* Quick-fill chips */}
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-slate-600">Quick fill:</span>
-              <button
-                type="button"
-                className="rounded-lg border border-orange-500/25 bg-orange-500/10 px-2.5 py-1 text-xs font-medium text-orange-300 transition hover:bg-orange-500/20"
-                onClick={() => { setLat("60.3913"); setLon("5.3221"); }}
-              >
-                Bergen
-              </button>
-              <button
-                type="button"
-                className="rounded-lg border border-white/15 bg-white/5 px-2.5 py-1 text-xs font-medium text-slate-300 transition hover:bg-white/10"
-                onClick={() => { setLat("59.9139"); setLon("10.7522"); }}
-              >
-                Oslo
-              </button>
-            </div>
-
-            <button className="button w-full" type="submit" disabled={loading}>
-              {loading ? <><Spinner /> Analyzing…</> : "Get Fire Risk"}
+      <section className="grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
+        <div className="panel space-y-5">
+          <div className="flex gap-1 rounded-2xl border border-white/[0.07] bg-black/20 p-1">
+            <button
+              type="button"
+              className={`flex-1 rounded-xl py-2.5 text-sm font-medium transition-all duration-200 ${
+                mode === "location"
+                  ? "border border-orange-500/20 bg-orange-500/15 text-orange-300"
+                  : "text-slate-400 hover:text-slate-100"
+              }`}
+              onClick={() => switchMode("location")}
+            >
+              Live location
             </button>
-          </form>
-        )}
+            <button
+              type="button"
+              className={`flex-1 rounded-xl py-2.5 text-sm font-medium transition-all duration-200 ${
+                mode === "csv"
+                  ? "border border-orange-500/20 bg-orange-500/15 text-orange-300"
+                  : "text-slate-400 hover:text-slate-100"
+              }`}
+              onClick={() => switchMode("csv")}
+            >
+              CSV scenario
+            </button>
+          </div>
 
-        {/* CSV form */}
-        {mode === "csv" && (
-          <div className="space-y-4 animate-fade-in">
-            <form className="space-y-3" onSubmit={handleUpload}>
-              <label className="block text-xs font-medium text-slate-400">
-                Dataset CSV
-                <input
-                  className="input mt-1.5"
-                  type="file"
-                  accept=".csv,text/csv"
-                  onChange={(e) => setSelectedFile(e.target.files?.[0] ?? null)}
-                />
-              </label>
-              <button className="button w-full" type="submit" disabled={loading || !selectedFile}>
-                {loading && !dataset ? <><Spinner /> Uploading…</> : "Upload Dataset"}
+          {mode === "location" ? (
+            <form className="space-y-5" onSubmit={handleLocationRisk}>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Coordinates</p>
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  <label className="block text-xs font-medium text-slate-400">
+                    Latitude
+                    <input
+                      className="input mt-1.5"
+                      type="number"
+                      step="0.0001"
+                      placeholder="37.98"
+                      value={lat}
+                      onChange={(event) => setLat(event.target.value)}
+                      required
+                    />
+                  </label>
+                  <label className="block text-xs font-medium text-slate-400">
+                    Longitude
+                    <input
+                      className="input mt-1.5"
+                      type="number"
+                      step="0.0001"
+                      placeholder="23.73"
+                      value={lon}
+                      onChange={(event) => setLon(event.target.value)}
+                      required
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Helpful note</p>
+                <p className="mt-2 text-sm leading-6 text-slate-400">
+                  The model is weather-driven. Dry-looking geography does not guarantee a high score; the current forecast still has to produce a short flashover time.
+                </p>
+              </div>
+
+              <button className="button w-full" type="submit" disabled={loading}>
+                {loading ? (
+                  <>
+                    <Spinner /> Analyzing live forecast...
+                  </>
+                ) : (
+                  "Run live location analysis"
+                )}
               </button>
             </form>
+          ) : (
+            <div className="space-y-5">
+              <form className="space-y-4" onSubmit={handleUpload}>
+                <label className="block text-xs font-medium text-slate-400">
+                  Dataset CSV
+                  <input
+                    className="input mt-1.5"
+                    type="file"
+                    accept=".csv,text/csv"
+                    onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
+                  />
+                </label>
 
-            {dataset && (
-              <div className="space-y-4 animate-fade-in">
-                <div className="flex items-center gap-3 rounded-xl border border-emerald-400/20 bg-emerald-400/5 px-4 py-3 text-sm">
-                  <span className="text-emerald-400">✓</span>
-                  <div>
-                    <p className="font-medium text-slate-100">{dataset.filename}</p>
-                    <p className="text-xs text-slate-400">{dataset.row_count} rows</p>
-                  </div>
-                </div>
-
-                <div className="space-y-3 rounded-xl border border-white/[0.07] bg-black/20 p-4">
-                  <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Weights</p>
-                  {[
-                    { label: "Temperature", value: temperatureWeight, set: setTemperatureWeight },
-                    { label: "Humidity", value: humidityWeight, set: setHumidityWeight },
-                    { label: "Wind speed", value: windWeight, set: setWindWeight },
-                  ].map(({ label, value, set }) => (
-                    <label key={label} className="flex items-center justify-between gap-3 text-xs text-slate-300">
-                      <span>{label}</span>
-                      <input
-                        className="input w-20 text-center"
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        max="1"
-                        value={value}
-                        onChange={(e) => set(Number(e.target.value))}
-                      />
-                    </label>
-                  ))}
-                </div>
-
-                <button className="button w-full" onClick={handleCsvRisk} disabled={loading}>
-                  {loading ? <><Spinner /> Running…</> : "Run Risk"}
+                <button className="button w-full" type="submit" disabled={loading || !selectedFile}>
+                  {loading && !dataset ? (
+                    <>
+                      <Spinner /> Uploading dataset...
+                    </>
+                  ) : (
+                    "Upload dataset"
+                  )}
                 </button>
-              </div>
-            )}
-          </div>
-        )}
+              </form>
 
-        {error && (
-          <div className="animate-fade-in rounded-xl border border-rose-400/25 bg-rose-400/10 px-3.5 py-2.5 text-sm text-rose-300">
-            {error}
-          </div>
+              {dataset && (
+                <>
+                  <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/5 p-4">
+                    <p className="font-semibold text-white">{dataset.filename}</p>
+                    <p className="mt-1 text-sm text-slate-400">{dataset.row_count} rows stored</p>
+                  </div>
+
+                  <div className="space-y-3 rounded-2xl border border-white/[0.07] bg-black/20 p-4">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Weights</p>
+                    {[
+                      { label: "Temperature", value: temperatureWeight, set: setTemperatureWeight },
+                      { label: "Humidity", value: humidityWeight, set: setHumidityWeight },
+                      { label: "Wind speed", value: windWeight, set: setWindWeight },
+                    ].map(({ label, value, set }) => (
+                      <label key={label} className="flex items-center justify-between gap-3 text-sm text-slate-300">
+                        <span>{label}</span>
+                        <input
+                          className="input w-24 text-center"
+                          type="number"
+                          step="0.1"
+                          min="0"
+                          max="1"
+                          value={value}
+                          onChange={(event) => set(Number(event.target.value))}
+                        />
+                      </label>
+                    ))}
+                  </div>
+
+                  <button className="button w-full" onClick={handleCsvRisk} disabled={loading}>
+                    {loading ? (
+                      <>
+                        <Spinner /> Running weighted scenario...
+                      </>
+                    ) : (
+                      "Compute scenario risk"
+                    )}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
+          {error && (
+            <div className="rounded-xl border border-rose-400/25 bg-rose-400/10 px-3.5 py-2.5 text-sm text-rose-300">
+              {error}
+            </div>
+          )}
+        </div>
+
+        {runResult ? (
+          <ResultCard run={runResult} />
+        ) : (
+          <section className="panel flex min-h-[320px] flex-col justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-orange-400/70">Awaiting result</p>
+              <h2 className="mt-1 text-2xl font-bold text-white">No analysis selected yet</h2>
+              <p className="mt-2 max-w-lg text-sm leading-6 text-slate-400">
+                Run a location analysis or a CSV scenario and the latest result will render here with the FRCM explanation or factor breakdown.
+              </p>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Manual runs</p>
+                <p className="mt-2 text-sm text-slate-300">Stored to your session-backed user account.</p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Background cities</p>
+                <p className="mt-2 text-sm text-slate-300">Visible in the watchlist even before anyone clicks the map.</p>
+              </div>
+            </div>
+          </section>
         )}
       </section>
 
-      {/* Result */}
-      {runResult ? (
-        <ResultCard run={runResult} />
-      ) : (
-        <section className="panel flex min-h-[280px] flex-col items-center justify-center gap-3 text-center">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-2xl">
-            🔥
-          </div>
-          <p className="text-sm text-slate-500">
-            {mode === "location" ? "Enter coordinates to analyze fire risk." : "Upload a CSV to get started."}
-          </p>
-        </section>
-      )}
+      <WatchlistGrid
+        cities={watchlist}
+        loading={watchlistLoading}
+        error={watchlistError}
+        eyebrow="City Watchlist"
+        title="Live city board"
+        subtitle="Use this as the fastest demo path: inspect background snapshots, prefill the console, or force a fresh calculation."
+        compact
+        actionHref="/map"
+        actionLabel="Open map"
+        onRecalculate={handleRecalculate}
+        busyCityKey={busyCityKey}
+      />
     </div>
   );
 }

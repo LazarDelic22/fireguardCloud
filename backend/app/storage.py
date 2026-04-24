@@ -22,7 +22,9 @@ def _sha256(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
-def create_dataset_from_bytes(db, filename: str, content: bytes) -> Dataset:
+def create_dataset_from_bytes(
+    db, filename: str, content: bytes, user_id: int | None = None
+) -> Dataset:
     if not content:
         raise ValueError("CSV upload is empty.")
 
@@ -32,6 +34,7 @@ def create_dataset_from_bytes(db, filename: str, content: bytes) -> Dataset:
 
     dataset = Dataset(
         id=dataset_id,
+        user_id=user_id,
         filename=filename or f"{dataset_id}.csv",
         stored_path=str(target_path),
         sha256=_sha256(content),
@@ -87,6 +90,7 @@ def run_to_out(run: Run) -> RunOut:
         params=json.loads(run.params_json),
         explain=ExplainOut.model_validate(json.loads(run.explain_json)),
         created_at=run.created_at,
+        source=run.source,
         lat=lat,
         lon=lon,
     )
